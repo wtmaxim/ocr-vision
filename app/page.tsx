@@ -2,6 +2,14 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+declare global {
+  interface Window {
+    umami?: {
+      track?: (event: string, data?: Record<string, unknown>) => void;
+    };
+  }
+}
+
 export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -79,6 +87,8 @@ export default function Home() {
     setLoading(true);
     setResult("");
     try {
+      const originalType = imageFile.type === "image/png" ? "png" : "jpg";
+      window.umami?.track?.("ocr_start", { lang: targetLang, type: originalType });
       const form = new FormData();
       
       
@@ -91,10 +101,12 @@ export default function Home() {
       const res = await fetch("/api/ocr", { method: "POST", body: form });
       if (!res.ok) {
         const errText = await res.text();
+        window.umami?.track?.("ocr_error", { lang: targetLang, type: originalType, code: res.status });
         throw new Error(errText || `HTTP ${res.status}`);
       }
       const text = await res.text();
       setResult(text);
+      window.umami?.track?.("ocr_success", { lang: targetLang, type: originalType });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown";
       setResult(`Erreur: ${message}`);
