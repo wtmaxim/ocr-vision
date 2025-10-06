@@ -204,7 +204,7 @@ export default function Home() {
             >
               Example
             </button>
-            <label className="text-sm text-gray-700">Langue</label>
+            <label className="text-sm text-gray-700">Output language</label>
             <select
               className="border rounded px-2 py-1"
               value={targetLang}
