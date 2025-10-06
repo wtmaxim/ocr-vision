@@ -1,103 +1,203 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useMemo, useRef, useState } from "react";
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [dragOver, setDragOver] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [targetLang, setTargetLang] = useState<string>("auto");
+  const [result, setResult] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : null), [imageFile]);
+
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && (file.type === "image/jpeg" || file.type === "image/png")) {
+      setImageFile(file);
+      setResult("");
+    }
+  }, []);
+
+  const onSelectFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) return;
+    setResult("");
+    if (file.type === "image/jpeg" || file.type === "image/png") {
+      setImageFile(file);
+    }
+  }, []);
+
+  // Fonction pour compresser une image
+  const compressImage = useCallback((file: File): Promise<File> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        // Calculer les nouvelles dimensions pour maintenir le ratio
+        let { width, height } = img;
+        const maxDimension = 1200; // Limite de dimension
+        
+        if (width > height && width > maxDimension) {
+          height = (height * maxDimension) / width;
+          width = maxDimension;
+        } else if (height > maxDimension) {
+          width = (width * maxDimension) / height;
+          height = maxDimension;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Dessiner l'image redimensionnée
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Convertir en blob avec compression
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const compressedFile = new File([blob], file.name, { type: 'image/jpeg' });
+            resolve(compressedFile);
+          } else {
+            resolve(file); // Fallback
+          }
+        }, 'image/jpeg', 0.8);
+      };
+      
+      img.src = URL.createObjectURL(file);
+    });
+  }, []);
+
+  const runOcr = useCallback(async () => {
+    if (!imageFile) return;
+    setLoading(true);
+    setResult("");
+    try {
+      const form = new FormData();
+      
+      
+      if (imageFile) {
+        const compressedFile = await compressImage(imageFile);
+        form.append("file", compressedFile);
+      }
+      form.append("targetLang", targetLang);
+      
+      const res = await fetch("/api/ocr", { method: "POST", body: form });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      const text = await res.text();
+      setResult(text);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown";
+      setResult(`Erreur: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [imageFile, compressImage, targetLang]);
+
+  const copyToClipboard = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(result || "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  }, [result]);
+
+  
+
+  return (
+    <div className="font-sans min-h-screen p-6 sm:p-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        <div>
+          <h1 className="text-xl font-semibold mb-4">OCR Vision</h1>
+          <div
+            className={
+              "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer " +
+              (dragOver ? "border-blue-500 bg-blue-50" : "border-gray-300")
+            }
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => inputRef.current?.click()}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+            {previewUrl ? (
+              <img src={previewUrl} alt="preview" className="mx-auto max-h-64 object-contain" />
+            ) : (
+              <div className="text-gray-600">
+                Déposez une image JPG/PNG ici, ou cliquez pour sélectionner un fichier
+                <div className="text-xs text-gray-500 mt-2">
+                  Formats JPG et PNG acceptés. Compression automatique pour optimiser l&apos;OCR.
+                </div>
+              </div>
+            )}
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png"
+              className="hidden"
+              onChange={onSelectFile}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <label className="text-sm text-gray-700">Langue</label>
+            <select
+              className="border rounded px-2 py-1"
+              value={targetLang}
+              onChange={(e) => setTargetLang(e.target.value)}
+              title="Langue de sortie"
+            >
+              <option value="auto">Auto (original)</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="pt">Português</option>
+              <option value="nl">Nederlands</option>
+              <option value="ja">日本語</option>
+              <option value="zh">中文</option>
+            </select>
+            <button
+              className="ml-auto rounded bg-black text-white px-4 py-2 disabled:opacity-50"
+              disabled={loading || !imageFile}
+              onClick={runOcr}
+            >
+              {loading ? "Analyse…" : "Analyser"}
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-medium">Résultat</h2>
+            <button
+              className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+              onClick={copyToClipboard}
+              disabled={!result}
+              title="Copier dans le presse-papiers"
+            >
+              {copied ? "Copié!" : "Copy"}
+            </button>
+          </div>
+          <div className="border rounded-lg p-4 min-h-[300px] bg-white whitespace-pre-wrap overflow-auto font-mono text-sm">
+            {result || (loading ? "Analyse en cours…" : "Aucun résultat pour le moment.")}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
