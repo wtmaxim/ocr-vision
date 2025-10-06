@@ -125,6 +125,37 @@ export default function Home() {
     }
   }, [result]);
 
+  const importExample = useCallback(async () => {
+    try {
+      const candidates = [
+        "/example.jpg",
+      ];
+      let response: Response | null = null;
+      let chosen: string | null = null;
+      for (const path of candidates) {
+        const r = await fetch(path, { cache: "no-store" });
+        if (r.ok) {
+          response = r;
+          chosen = path;
+          break;
+        }
+      }
+      if (!response || !chosen) return;
+      const blob = await response.blob();
+      const inferredType = blob.type || (chosen.endsWith(".png") ? "image/png" : "image/jpeg");
+      const file = new File([blob], chosen.replace("/", ""), { type: inferredType });
+      setImageFile(file);
+      setResult("");
+      if (inputRef.current) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        inputRef.current.files = dt.files;
+      }
+    } catch {
+      // silencieux
+    }
+  }, []);
+
   
 
   return (
@@ -149,9 +180,9 @@ export default function Home() {
               <img src={previewUrl} alt="preview" className="mx-auto max-h-64 object-contain" />
             ) : (
               <div className="text-gray-600">
-                Déposez une image JPG/PNG ici, ou cliquez pour sélectionner un fichier
+                Drop a JPG/PNG image here, or click to select a file
                 <div className="text-xs text-gray-500 mt-2">
-                  Formats JPG et PNG acceptés. Compression automatique pour optimiser l&apos;OCR.
+                  Formats JPG and PNG accepted. Automatic compression to optimize OCR.
                 </div>
               </div>
             )}
@@ -165,48 +196,56 @@ export default function Home() {
           </div>
 
           <div className="mt-4 flex items-center gap-3">
+            <button
+              className="rounded border px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200"
+              type="button"
+              onClick={importExample}
+              title="Import example from /public"
+            >
+              Example
+            </button>
             <label className="text-sm text-gray-700">Langue</label>
             <select
               className="border rounded px-2 py-1"
               value={targetLang}
               onChange={(e) => setTargetLang(e.target.value)}
-              title="Langue de sortie"
+              title="Output language"
             >
               <option value="auto">Auto (original)</option>
               <option value="en">English</option>
-              <option value="fr">Français</option>
+              <option value="fr">French</option>
               <option value="es">Español</option>
               <option value="de">Deutsch</option>
               <option value="it">Italiano</option>
               <option value="pt">Português</option>
               <option value="nl">Nederlands</option>
-              <option value="ja">日本語</option>
-              <option value="zh">中文</option>
+              <option value="ja">Japanese</option>
+              <option value="zh">Chinese</option>
             </select>
             <button
               className="ml-auto rounded bg-black text-white px-4 py-2 disabled:opacity-50"
               disabled={loading || !imageFile}
               onClick={runOcr}
             >
-              {loading ? "Analyse…" : "Analyser"}
+              {loading ? "Analyse…" : "Analyse"}
             </button>
           </div>
         </div>
 
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-medium">Résultat</h2>
+            <h2 className="text-lg font-medium">Result</h2>
             <button
               className="rounded border px-3 py-1 text-sm disabled:opacity-50"
               onClick={copyToClipboard}
               disabled={!result}
-              title="Copier dans le presse-papiers"
+              title="Copy to clipboard"
             >
-              {copied ? "Copié!" : "Copy"}
+              {copied ? "Copied!" : "Copy to clipboard"}
             </button>
           </div>
           <div className="border rounded-lg p-4 min-h-[300px] bg-white whitespace-pre-wrap overflow-auto font-mono text-sm">
-            {result || (loading ? "Analyse en cours…" : "Aucun résultat pour le moment.")}
+            {result || (loading ? "Analysing..." : "No result yet.")}
           </div>
         </div>
       </div>
