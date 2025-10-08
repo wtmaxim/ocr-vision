@@ -150,7 +150,6 @@ export async function POST(req: NextRequest) {
       out = await generateText({
         model: aiClient(model),
         temperature: 0.1,
-        maxSteps: 1,
         system,
         messages: [
           {
