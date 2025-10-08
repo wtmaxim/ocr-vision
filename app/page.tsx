@@ -216,50 +216,50 @@ export default function Home() {
 
   const importExample = useCallback(async () => {
     try {
-      const candidates = [
-        "/example.jpg",
-        "/example.pdf",
-      ];
-      let response: Response | null = null;
-      let chosen: string | null = null;
-      for (const path of candidates) {
-        const r = await fetch(path, { cache: "no-store" });
-        if (r.ok) {
-          response = r;
-          chosen = path;
-          break;
-        }
-      }
-      if (!response || !chosen) return;
+      const response = await fetch("/example.jpg", { cache: "no-store" });
+      if (!response.ok) return;
       const blob = await response.blob();
-      const inferredType = blob.type || (chosen.endsWith(".pdf") ? "application/pdf" : chosen.endsWith(".png") ? "image/png" : "image/jpeg");
-      const file = new File([blob], chosen.replace("/", ""), { type: inferredType });
+      const file = new File([blob], "example.jpg", { type: "image/jpeg" });
+      setImageFile(file);
+      setPdfFile(null);
+      setResult("");
+      if (inputRef.current) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        inputRef.current.files = dt.files;
+      }
+    } catch {
+      // silencieux
+    }
+  }, []);
+
+  const importExamplePdf = useCallback(async () => {
+    try {
+      const response = await fetch("/example.pdf", { cache: "no-store" });
+      if (!response.ok) return;
+      const blob = await response.blob();
+      const file = new File([blob], "example.pdf", { type: "application/pdf" });
+      setPdfFile(file);
+      setImageFile(null);
       
-      if (file.type === "application/pdf") {
-        setPdfFile(file);
-        setImageFile(null);
-        // Prévisualiser la première page du PDF
-        try {
-          const { pdfToImg } = await import("pdftoimg-js/browser");
-          const fileUrl = URL.createObjectURL(file);
-          const images = await pdfToImg(fileUrl, { 
-            pages: "firstPage", 
-            imgType: "jpg", 
-            scale: 0.8 
-          });
-          URL.revokeObjectURL(fileUrl);
-          if (images) {
-            const response = await fetch(Array.isArray(images) ? images[0] : images);
-            const blob = await response.blob();
-            const previewFile = new File([blob], `${file.name}-page1.jpg`, { type: "image/jpeg" });
-            setImageFile(previewFile);
-          }
-        } catch {
-          // Ignore preview failure
+      // Prévisualiser la première page du PDF
+      try {
+        const { pdfToImg } = await import("pdftoimg-js/browser");
+        const fileUrl = URL.createObjectURL(file);
+        const images = await pdfToImg(fileUrl, { 
+          pages: "firstPage", 
+          imgType: "jpg", 
+          scale: 0.8 
+        });
+        URL.revokeObjectURL(fileUrl);
+        if (images) {
+          const response = await fetch(Array.isArray(images) ? images[0] : images);
+          const blob = await response.blob();
+          const previewFile = new File([blob], `${file.name}-page1.jpg`, { type: "image/jpeg" });
+          setImageFile(previewFile);
         }
-      } else {
-        setImageFile(file);
-        setPdfFile(null);
+      } catch {
+        // Ignore preview failure
       }
       
       setResult("");
@@ -324,9 +324,17 @@ export default function Home() {
               className="rounded border px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200"
               type="button"
               onClick={importExample}
-              title="Import example from /public (JPG or PDF)"
+              title="Import example JPG from /public"
             >
-              Example
+              Example JPG
+            </button>
+            <button
+              className="rounded border px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200"
+              type="button"
+              onClick={importExamplePdf}
+              title="Import example PDF from /public"
+            >
+              Example PDF
             </button>
             <label className="text-sm text-gray-700">Output language</label>
             <select
