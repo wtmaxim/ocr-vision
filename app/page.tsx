@@ -218,6 +218,7 @@ export default function Home() {
     try {
       const candidates = [
         "/example.jpg",
+        "/example.pdf",
       ];
       let response: Response | null = null;
       let chosen: string | null = null;
@@ -231,9 +232,36 @@ export default function Home() {
       }
       if (!response || !chosen) return;
       const blob = await response.blob();
-      const inferredType = blob.type || (chosen.endsWith(".png") ? "image/png" : "image/jpeg");
+      const inferredType = blob.type || (chosen.endsWith(".pdf") ? "application/pdf" : chosen.endsWith(".png") ? "image/png" : "image/jpeg");
       const file = new File([blob], chosen.replace("/", ""), { type: inferredType });
-      setImageFile(file);
+      
+      if (file.type === "application/pdf") {
+        setPdfFile(file);
+        setImageFile(null);
+        // Prévisualiser la première page du PDF
+        try {
+          const { pdfToImg } = await import("pdftoimg-js/browser");
+          const fileUrl = URL.createObjectURL(file);
+          const images = await pdfToImg(fileUrl, { 
+            pages: "firstPage", 
+            imgType: "jpg", 
+            scale: 0.8 
+          });
+          URL.revokeObjectURL(fileUrl);
+          if (images) {
+            const response = await fetch(Array.isArray(images) ? images[0] : images);
+            const blob = await response.blob();
+            const previewFile = new File([blob], `${file.name}-page1.jpg`, { type: "image/jpeg" });
+            setImageFile(previewFile);
+          }
+        } catch {
+          // Ignore preview failure
+        }
+      } else {
+        setImageFile(file);
+        setPdfFile(null);
+      }
+      
       setResult("");
       if (inputRef.current) {
         const dt = new DataTransfer();
@@ -296,7 +324,7 @@ export default function Home() {
               className="rounded border px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200"
               type="button"
               onClick={importExample}
-              title="Import example from /public"
+              title="Import example from /public (JPG or PDF)"
             >
               Example
             </button>
