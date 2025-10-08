@@ -13,22 +13,51 @@ declare global {
 export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [targetLang, setTargetLang] = useState<string>("auto");
+  const [outputFormat, setOutputFormat] = useState<"markdown" | "json">("markdown");
   const [result, setResult] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : null), [imageFile]);
+  const previewUrl = useMemo(() => {
+    if (imageFile) return URL.createObjectURL(imageFile);
+    return null;
+  }, [imageFile]);
 
-  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const onDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && (file.type === "image/jpeg" || file.type === "image/png")) {
+    if (!file) return;
+    setResult("");
+    if (file.type === "application/pdf") {
+      setPdfFile(file);
+      setImageFile(null);
+      // Prévisualiser la première page du PDF
+      try {
+        const { pdfToImg } = await import("pdftoimg-js/browser");
+        const fileUrl = URL.createObjectURL(file);
+        const images = await pdfToImg(fileUrl, { 
+          pages: "firstPage", 
+          imgType: "jpg", 
+          scale: 0.8 
+        });
+        URL.revokeObjectURL(fileUrl);
+        if (images) {
+          const response = await fetch(Array.isArray(images) ? images[0] : images);
+          const blob = await response.blob();
+          const previewFile = new File([blob], `${file.name}-page1.jpg`, { type: "image/jpeg" });
+          setImageFile(previewFile);
+        }
+      } catch {
+        // Ignore preview failure
+      }
+    } else if (file.type === "image/jpeg" || file.type === "image/png") {
       setImageFile(file);
-      setResult("");
+      setPdfFile(null);
     }
   }, []);
 
@@ -36,8 +65,31 @@ export default function Home() {
     const file = e.target.files?.[0] || null;
     if (!file) return;
     setResult("");
-    if (file.type === "image/jpeg" || file.type === "image/png") {
+    if (file.type === "application/pdf") {
+      setPdfFile(file);
+      setImageFile(null);
+      // Prévisualiser la première page du PDF
+      try {
+        const { pdfToImg } = await import("pdftoimg-js/browser");
+        const fileUrl = URL.createObjectURL(file);
+        const images = await pdfToImg(fileUrl, { 
+          pages: "firstPage", 
+          imgType: "jpg", 
+          scale: 1.0 
+        });
+        URL.revokeObjectURL(fileUrl);
+        if (images) {
+          const response = await fetch(Array.isArray(images) ? images[0] : images);
+          const blob = await response.blob();
+          const previewFile = new File([blob], `${file.name}-page1.jpg`, { type: "image/jpeg" });
+          setImageFile(previewFile);
+        }
+      } catch {
+        // Ignore preview failure
+      }
+    } else if (file.type === "image/jpeg" || file.type === "image/png") {
       setImageFile(file);
+      setPdfFile(null);
     }
   }, []);
 
@@ -51,7 +103,7 @@ export default function Home() {
       img.onload = () => {
         // Calculer les nouvelles dimensions pour maintenir le ratio
         let { width, height } = img;
-        const maxDimension = 1200; // Limite de dimension
+        const maxDimension = 720; // Limite de dimension (plus petit pour accélérer)
         
         if (width > height && width > maxDimension) {
           height = (height * maxDimension) / width;
@@ -75,7 +127,7 @@ export default function Home() {
           } else {
             resolve(file); // Fallback
           }
-        }, 'image/jpeg', 0.8);
+        }, 'image/jpeg', 0.6);
       };
       
       img.src = URL.createObjectURL(file);
@@ -83,20 +135,52 @@ export default function Home() {
   }, []);
 
   const runOcr = useCallback(async () => {
-    if (!imageFile) return;
+    if (!imageFile && !pdfFile) return;
     setLoading(true);
     setResult("");
     try {
-      const originalType = imageFile.type === "image/png" ? "png" : "jpg";
+      const originalType = imageFile ? (imageFile.type === "image/png" ? "png" : "jpg") : "pdf";
       window.umami?.track?.("ocr_start", { lang: targetLang, type: originalType });
       const form = new FormData();
       
-      
-      if (imageFile) {
+      if (pdfFile) {
+        // Convertir PDF en images côté client
+        try {
+          const { pdfToImg } = await import("pdftoimg-js/browser");
+          const fileUrl = URL.createObjectURL(pdfFile);
+          const images = await pdfToImg(fileUrl, { 
+            pages: "all", 
+            imgType: "jpg", 
+            scale: 0.8 
+          });
+          URL.revokeObjectURL(fileUrl);
+          
+          if (Array.isArray(images)) {
+            for (let i = 0; i < images.length; i++) {
+              const response = await fetch(images[i]);
+              const blob = await response.blob();
+              const pageFile = new File([blob], `${pdfFile.name}-page${i + 1}.jpg`, { type: "image/jpeg" });
+              const compressed = await compressImage(pageFile);
+              form.append("files[]", compressed);
+            }
+          } else if (images) {
+            const response = await fetch(images);
+            const blob = await response.blob();
+            const pageFile = new File([blob], `${pdfFile.name}-page1.jpg`, { type: "image/jpeg" });
+            const compressed = await compressImage(pageFile);
+            form.append("file", compressed);
+          }
+        } catch (err) {
+          console.error("PDF conversion failed:", err);
+          throw new Error("Failed to convert PDF to images");
+        }
+      } else if (imageFile) {
         const compressedFile = await compressImage(imageFile);
         form.append("file", compressedFile);
       }
+      
       form.append("targetLang", targetLang);
+      form.append("format", outputFormat);
       
       const res = await fetch("/api/ocr", { method: "POST", body: form });
       if (!res.ok) {
@@ -104,8 +188,13 @@ export default function Home() {
         window.umami?.track?.("ocr_error", { lang: targetLang, type: originalType, code: res.status });
         throw new Error(errText || `HTTP ${res.status}`);
       }
-      const text = await res.text();
-      setResult(text);
+      if (outputFormat === "json") {
+        const data = await res.json();
+        setResult(JSON.stringify(data, null, 2));
+      } else {
+        const text = await res.text();
+        setResult(text);
+      }
       window.umami?.track?.("ocr_success", { lang: targetLang, type: originalType });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown";
@@ -113,7 +202,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [imageFile, compressImage, targetLang]);
+  }, [imageFile, pdfFile, compressImage, targetLang, outputFormat]);
 
   const copyToClipboard = useCallback(async () => {
     try {
@@ -177,19 +266,26 @@ export default function Home() {
             onClick={() => inputRef.current?.click()}
           >
             {previewUrl ? (
-              <img src={previewUrl} alt="preview" className="mx-auto max-h-64 object-contain" />
+              <div>
+                <img src={previewUrl} alt="preview" className="mx-auto max-h-64 object-contain" />
+                {pdfFile && (
+                  <div className="text-xs text-gray-500 mt-2 text-center">
+                    📄 PDF: {pdfFile.name} (preview: page 1)
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="text-gray-600">
-                Drop a JPG/PNG image here, or click to select a file
+                Drop a JPG/PNG image or PDF here, or click to select a file
                 <div className="text-xs text-gray-500 mt-2">
-                  Formats JPG and PNG accepted. Automatic compression to optimize OCR.
+                  Formats JPG, PNG and PDF accepted. Automatic compression for images.
                 </div>
               </div>
             )}
             <input
               ref={inputRef}
               type="file"
-              accept="image/jpeg,image/png"
+              accept="image/jpeg,image/png,application/pdf"
               className="hidden"
               onChange={onSelectFile}
             />
@@ -222,9 +318,19 @@ export default function Home() {
               <option value="ja">Japanese</option>
               <option value="zh">Chinese</option>
             </select>
+            <label className="text-sm text-gray-700">Format</label>
+            <select
+              className="border rounded px-2 py-1"
+              value={outputFormat}
+              onChange={(e) => setOutputFormat(e.target.value as "markdown" | "json")}
+              title="Output format"
+            >
+              <option value="markdown">Markdown</option>
+              <option value="json">JSON</option>
+            </select>
             <button
               className="ml-auto rounded bg-black text-white px-4 py-2 disabled:opacity-50"
-              disabled={loading || !imageFile}
+              disabled={loading || (!imageFile && !pdfFile)}
               onClick={runOcr}
             >
               {loading ? "Analyse…" : "Analyse"}
